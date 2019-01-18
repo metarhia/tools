@@ -4,7 +4,9 @@
   "description": "Metarhia development tools",
   "main": "tools.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "lint": "eslint . && remark . && prettier --debug-check \"**/*.js\" \"**/*.json\" \"**/*.md\" .eslintrc .prettierrc .remarkrc",
+    "fmt": "prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\" .eslintrc .prettierrc .remarkrc",
+    "test": "npm run -s lint"
   },
   "repository": {
     "type": "git",
@@ -20,5 +22,16 @@
   "bugs": {
     "url": "https://github.com/metarhia/tools/issues"
   },
-  "homepage": "https://github.com/metarhia/tools#readme"
+  "homepage": "https://github.com/metarhia/tools#readme",
+  "devDependencies": {
+    "eslint": "^5.12.0",
+    "eslint-config-metarhia": "^6.1.0",
+    "eslint-config-prettier": "^3.5.0",
+    "eslint-plugin-import": "^2.14.0",
+    "eslint-plugin-prettier": "^3.0.1",
+    "prettier": "^1.15.3",
+    "remark-cli": "^6.0.1",
+    "remark-preset-lint-metarhia": "^1.0.4",
+    "remark-validate-links": "^8.0.0"
+  }
 }
