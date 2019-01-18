@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "description": "Metarhia development tools",
   "main": "tools.js",
+  "bin": {
+    "metarhia-update-authors": "./bin/update-authors.js"
+  },
+  "files": [
+    "bin/"
+  ],
   "scripts": {
     "lint": "eslint . && remark . && prettier --list-different \"**/*.js\" \"**/*.json\" \"**/*.md\" \"**/*.yml\" .eslintrc .prettierrc .remarkrc .huskyrc",
     "fmt": "prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\" \"**/*.yml\" .eslintrc .prettierrc .remarkrc .huskyrc",
