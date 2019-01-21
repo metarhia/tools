@@ -9,6 +9,7 @@ const readline = require('readline');
 const util = require('util');
 
 const toolName = path.basename(process.argv[1]);
+const toolVersion = require('../package.json').version;
 
 const gitLogAllowedOptions = [
   '--all-match',
@@ -29,12 +30,16 @@ This tool lists and optionally saves to file all of the repository contributors
 based on the \`git log\` command output, ordered by the first contribution.
 
 Usage: ${toolName} [--until=commit] [--out[=path]] [<git log passed options>]
+       ${toolName} --help
+       ${toolName} --version
 
 Options:
   --until=commit  stop at the specified commit instead of going through full
                   repo history
   --out[=path]    change output path (./AUTHORS is the default), if the path is
                   omitted, print to stdout
+  --help          print this help message and exit
+  --version       print version and exit
 
 Options passed straight to \`git log\`:
   '--grep='
@@ -48,6 +53,9 @@ const gitLogPassedOptions = [];
 for (const arg of process.argv.slice(2)) {
   if (arg.startsWith('--help') || arg.startsWith('-h')) {
     console.log(help);
+    process.exit(0);
+  } else if (arg.startsWith('--version')) {
+    console.log(toolVersion);
     process.exit(0);
   } else if (arg.startsWith('--until=')) {
     untilCommit = arg.split('=')[1];
