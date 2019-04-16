@@ -1,10 +1,25 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('fs');
+
 const { cli } = require('../lib/cli.js');
-const { LabelHandler } = require('../lib/labels.js');
+const { LabelHandler, runIf } = require('../lib/labels.js');
+
+const sprintLabels = labels => {
+  if (!Array.isArray(labels)) labels = [labels];
+  return labels
+    .map(
+      label =>
+        `name: ${label.name}\n` +
+        `color: ${label.color}\n` +
+        `description: ${label.description}\n`
+    )
+    .join('\n');
+};
 
 const args = cli
+  .usage('$0 <options>')
   .option('user', {
     type: 'string',
     description: 'github username',
@@ -15,23 +30,23 @@ const args = cli
     description: 'github access token',
     alias: 't',
   })
-  .option('src-repo-owner', {
+  .option('src-repo', {
     type: 'string',
-    description: 'Repository owner',
-    alias: 'o',
+    description: "Source repository. e.g. 'metarhia/tools'",
+    alias: 's',
   })
-  .option('src-repo-name', {
+  .option('dst-repo', {
     type: 'string',
-    description: 'Repository name',
-    alias: 'n',
+    description: "Destination repository. e.g. 'metarhia/tools'",
+    alias: 'd',
   })
-  .option('dst-repo-owner', {
+  .option('src-file', {
     type: 'string',
-    description: 'Owner of repository to which labels will be copied',
+    description: 'File from which labels will be copied',
   })
-  .option('dst-repo-name', {
+  .option('dst-file', {
     type: 'string',
-    description: 'Name of repository to which labels will be copied',
+    description: 'File to which labels will be copied',
   })
   .option('delete-before-copy', {
     type: 'boolean',
@@ -50,54 +65,98 @@ const args = cli
     type: 'string',
     alias: 'c',
   })
+  .conflict('dst-file', 'dst-repo')
+  .conflict('src-file', 'src-repo')
+  .conflict('src-file', 'dst-file')
+  .command('get', 'Get labels from repository', args => {
+    const handler = new LabelHandler({
+      repo: args.dstRepo,
+      user: args.user,
+      token: args.token,
+    });
+    handler.get((err, labels) => {
+      if (err) {
+        console.error('Cannot get labels', err);
+        return;
+      }
+      console.log('Labels:\n\n' + sprintLabels(labels));
+    });
+  })
   .parse(process.argv);
 
 const handler = new LabelHandler({
-  repoOwner: args.dstRepoOwner,
-  repoName: args.dstRepoName,
+  repo: args.dstRepo,
   user: args.user,
   token: args.token,
 });
 
-// TODO(SemenchenkoVitaliy): remove when new version of metasync is published
-const runIf = (condition, asyncFn, ...args) => {
-  if (condition) {
-    asyncFn(...args);
-  } else {
-    const callback = args[args.length - 1];
-    process.nextTick(callback, null);
-  }
+const readDump = (file, cb) => {
+  fs.readFile(args.srcFile, 'utf8', (err, data) => {
+    if (err) {
+      cb(err);
+      return;
+    }
+    let result;
+    try {
+      result = JSON.parse(data);
+    } catch (e) {
+      err = e;
+    }
+    if (err) cb(err);
+    else cb(null, result);
+  });
+};
+
+const writeDump = (file, data, cb) => {
+  data = data.map(label => ({
+    name: label.name,
+    color: label.color,
+    description: label.description,
+  }));
+  fs.writeFile(file, JSON.stringify(data), cb);
 };
 
 runIf(
-  args.deleteBeforeCopy,
+  !args.dstFile && args.deleteBeforeCopy,
   cb => handler.delete(cb),
   err => {
     if (err) {
       console.log('Cannot delete labels before copying', err);
       process.exit(1);
     }
-    handler.copyFrom(
-      args.srcRepoOwner,
-      args.srcRepoName,
-      args.updateExistingLabels,
-      (err, data) => {
+    if (args.dstFiles) {
+      handler.getFrom(args.srcRepo, (err, labels) => {
         if (err) {
-          console.error('Cannot copy labels', err);
+          console.error('Cannot get labels', err);
           process.exit(1);
         }
-        const result =
-          'Copied labels:\n\n' +
-          data
-            .map(
-              label =>
-                `name: ${label.name}\n` +
-                `color: ${label.color}\n` +
-                `description: ${label.description}\n`
-            )
-            .join('\n');
-        console.log(result);
-      }
-    );
+        writeDump(args.dstFile, labels, err => {
+          if (err) {
+            console.error(`Cannot write dump in ${args.dstFile}`, err);
+            process.exit(1);
+          }
+          console.log(`Labels were dumped in ${args.dstFile}`);
+        });
+      });
+    } else {
+      runIf(
+        args.srcFile,
+        args.srcRepo,
+        cb => readDump(args.srcFile, cb),
+        (err, repo) => {
+          if (err) {
+            console.error(`Cannot read dump file ${args.srcFile}`, err);
+            process.exit(1);
+          }
+          handler.copyFrom(repo, args.updateExistingLabels, (err, labels) => {
+            if (err) {
+              console.error('Cannot copy labels', err);
+              process.exit(1);
+            }
+            console.log('Copied labels:\n\n' + sprintLabels(labels));
+          });
+        }
+      );
+    }
   }
 );
