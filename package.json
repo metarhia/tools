@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "Metarhia development tools",
   "bin": {
-    "metarhia-update-authors": "./bin/update-authors.js"
+    "metarhia-update-authors": "./bin/update-authors.js",
+    "metarhia-copy-labels": "./bin/copy-labels.js"
   },
   "files": [
     "bin/"
