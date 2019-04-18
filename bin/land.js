@@ -14,6 +14,17 @@ const options = {
   host: 'api.github.com',
 };
 
+const supportCommits = () => {
+  const differCommits = parseInt(
+    childProcess
+      .execSync(`git rev-list --count master..${landedBranch}`)
+      .toString('utf8')
+  );
+  return childProcess.execSync(
+    `git rebase --autosquash HEAD@{${differCommits}}`
+  );
+};
+
 const httpGet = commitMessage => {
   https
     .get(options, res => {
@@ -47,6 +58,7 @@ const getPRURL = () => {
   const gitConfig = childProcess
     .execSync('git config --get remote.origin.url')
     .toString('utf8');
+  supportCommits();
 
   const repoName = gitConfig.slice(
     gitConfig.indexOf(':') + 1,
