@@ -29,9 +29,6 @@
     "url": "https://github.com/metarhia/tools/issues"
   },
   "homepage": "https://github.com/metarhia/tools#readme",
-  "dependencies": {
-    "metasync": "^0.3.31"
-  },
   "devDependencies": {
     "@commitlint/cli": "^7.3.2",
     "@commitlint/config-conventional": "^7.3.1",
