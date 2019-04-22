@@ -6,16 +6,15 @@ const fs = require('fs');
 const { cli } = require('../lib/cli.js');
 const { LabelHandler, runIf } = require('../lib/labels.js');
 
-const sprintLabels = labels => {
+const printLabels = labels => {
   if (!Array.isArray(labels)) labels = [labels];
-  return labels
-    .map(
-      label =>
-        `name: ${label.name}\n` +
-        `color: ${label.color}\n` +
-        `description: ${label.description}\n`
-    )
-    .join('\n');
+  console.table(
+    labels.reduce((acc, label) => {
+      acc[label.name] = label;
+      return acc;
+    }, {}),
+    ['color', 'description']
+  );
 };
 
 const args = cli
@@ -42,11 +41,11 @@ const args = cli
   })
   .option('src-file', {
     type: 'string',
-    description: 'File from which labels will be copied',
+    description: 'File to read labels from',
   })
   .option('dst-file', {
     type: 'string',
-    description: 'File to which labels will be copied',
+    description: 'File to write labels to',
   })
   .option('delete-before-copy', {
     type: 'boolean',
@@ -70,7 +69,7 @@ const args = cli
   .conflict('src-file', 'dst-file')
   .command('get', 'Get labels from repository', args => {
     const handler = new LabelHandler({
-      repo: args.dstRepo,
+      repo: args.srcRepo,
       user: args.user,
       token: args.token,
     });
@@ -79,7 +78,7 @@ const args = cli
         console.error('Cannot get labels', err);
         return;
       }
-      console.log('Labels:\n\n' + sprintLabels(labels));
+      printLabels(labels);
     });
   })
   .parse(process.argv);
@@ -124,7 +123,7 @@ runIf(
       console.log('Cannot delete labels before copying', err);
       process.exit(1);
     }
-    if (args.dstFiles) {
+    if (args.dstFile) {
       handler.getFrom(args.srcRepo, (err, labels) => {
         if (err) {
           console.error('Cannot get labels', err);
@@ -153,7 +152,7 @@ runIf(
               console.error('Cannot copy labels', err);
               process.exit(1);
             }
-            console.log('Copied labels:\n\n' + sprintLabels(labels));
+            printLabels(labels);
           });
         }
       );
