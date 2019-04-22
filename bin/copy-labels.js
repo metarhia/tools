@@ -4,7 +4,7 @@
 const fs = require('fs');
 
 const { cli } = require('../lib/cli.js');
-const { LabelHandler, runIf } = require('../lib/labels.js');
+const { LabelHandler } = require('../lib/labels.js');
 
 const printLabels = labels => {
   if (!Array.isArray(labels)) labels = [labels];
@@ -17,7 +17,7 @@ const printLabels = labels => {
   );
 };
 
-const args = cli
+cli
   .usage('$0 <options>')
   .option('user', {
     type: 'string',
@@ -73,89 +73,60 @@ const args = cli
       user: args.user,
       token: args.token,
     });
-    handler.get((err, labels) => {
+    handler
+      .get()
+      .then(printLabels, err => console.error('Cannot get labels', err));
+  });
+
+const readDump = file =>
+  new Promise((resolve, reject) => {
+    fs.readFile(file, 'utf8', (err, data) => {
       if (err) {
-        console.error('Cannot get labels', err);
+        reject(err);
         return;
       }
-      printLabels(labels);
+      let result;
+      try {
+        result = JSON.parse(data);
+      } catch (e) {
+        err = e;
+      }
+      if (err) reject(err);
+      else resolve(result);
     });
-  })
-  .parse(process.argv);
-
-const handler = new LabelHandler({
-  repo: args.dstRepo,
-  user: args.user,
-  token: args.token,
-});
-
-const readDump = (file, cb) => {
-  fs.readFile(args.srcFile, 'utf8', (err, data) => {
-    if (err) {
-      cb(err);
-      return;
-    }
-    let result;
-    try {
-      result = JSON.parse(data);
-    } catch (e) {
-      err = e;
-    }
-    if (err) cb(err);
-    else cb(null, result);
   });
-};
 
-const writeDump = (file, data, cb) => {
-  data = data.map(label => ({
+const writeDump = (file, data) => {
+  const result = data.map(label => ({
     name: label.name,
     color: label.color,
     description: label.description,
   }));
-  fs.writeFile(file, JSON.stringify(data), cb);
+  return new Promise((resolve, reject) => {
+    fs.writeFile(file, JSON.stringify(result), err => {
+      if (err) reject(err);
+      else resolve(data);
+    });
+  });
 };
 
-runIf(
-  !args.dstFile && args.deleteBeforeCopy,
-  cb => handler.delete(cb),
-  err => {
-    if (err) {
-      console.log('Cannot delete labels before copying', err);
-      process.exit(1);
-    }
-    if (args.dstFile) {
-      handler.getFrom(args.srcRepo, (err, labels) => {
-        if (err) {
-          console.error('Cannot get labels', err);
-          process.exit(1);
-        }
-        writeDump(args.dstFile, labels, err => {
-          if (err) {
-            console.error(`Cannot write dump in ${args.dstFile}`, err);
-            process.exit(1);
-          }
-          console.log(`Labels were dumped in ${args.dstFile}`);
-        });
-      });
-    } else {
-      runIf(
-        args.srcFile,
-        args.srcRepo,
-        cb => readDump(args.srcFile, cb),
-        (err, repo) => {
-          if (err) {
-            console.error(`Cannot read dump file ${args.srcFile}`, err);
-            process.exit(1);
-          }
-          handler.copyFrom(repo, args.updateExistingLabels, (err, labels) => {
-            if (err) {
-              console.error('Cannot copy labels', err);
-              process.exit(1);
-            }
-            printLabels(labels);
-          });
-        }
-      );
-    }
+const copy = async args => {
+  const handler = new LabelHandler({
+    repo: args.dstRepo,
+    user: args.user,
+    token: args.token,
+  });
+  if (!args.dstFile && args.deleteBeforeCopy) await handler.delete();
+
+  if (args.dstFile) {
+    const labels = await handler.getFrom(args.srcRepo);
+    return await writeDump(args.dstFile, labels);
+  } else {
+    const labels = args.srcFile ? await readDump(args.srcFile) : args.srcRepo;
+    return await handler.copyFrom(labels, args.updateExistingLabels);
   }
-);
+};
+
+cli.parse(process.argv, args => {
+  copy(args).then(printLabels, err => console.error('Cannot copy labels', err));
+});
