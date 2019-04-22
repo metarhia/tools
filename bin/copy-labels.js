@@ -103,7 +103,7 @@ const writeDump = (file, data) => {
     description: label.description,
   }));
   return new Promise((resolve, reject) => {
-    fs.writeFile(file, JSON.stringify(result), err => {
+    fs.writeFile(file, JSON.stringify(result, null, 2), err => {
       if (err) reject(err);
       else resolve(data);
     });
