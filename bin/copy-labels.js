@@ -1,10 +1,75 @@
 #!/usr/bin/env node
+
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
+const util = require('util');
 
-const { cli } = require('../lib/cli.js');
 const { LabelHandler } = require('../lib/labels.js');
+
+const toolName = path.basename(process.argv[1]);
+const toolVersion = require('../package.json').version;
+
+const padding = ' '.repeat(toolName.length);
+
+const help = `\
+This tool copies labels from source repository or file to destination
+repository or file.
+
+Usage: ${toolName} [--config=path] [--user=user] [--token=token]
+       ${padding} [--src-repo=repo] [--dst-repo=repo] [--src-file=path]
+       ${padding} [--dst-file=path] [--delete] [--update]
+       ${toolName} --help
+       ${toolName} --version
+
+Options:
+  --config   Path to config file
+  --user     github username
+  --token    github access token
+  --src-repo Source repository. e.g. 'metarhia/tools'
+  --dst-repo Destination repository. e.g. 'metarhia/tools'
+  --src-file File to read labels from
+  --dst-file File to write labels to
+  --delete   Delete all labels in destination repository before
+             copy
+  --update   Update existing labels with the same name
+  --help     print this help message and exit
+  --version  print version and exit
+`;
+
+const args = {};
+
+const options = new Map([
+  ['--config', 'config'],
+  ['--user', 'user'],
+  ['--token', 'token'],
+  ['--src-repo', 'srcRepo'],
+  ['--dst-repo', 'dstRepo'],
+  ['--src-file', 'srcFile'],
+  ['--dst-file', 'dstFile'],
+  ['--delete', 'delete'],
+  ['--update', 'update'],
+]);
+
+for (const arg of process.argv.slice(2)) {
+  const [opt, value] = arg.split('=');
+  if (opt.startsWith('--help') || opt.startsWith('-h')) {
+    console.log(help);
+    process.exit(0);
+  } else if (opt.startsWith('--version') || arg.startsWith('-v')) {
+    console.log(toolVersion);
+    process.exit(0);
+  } else if (options.has(opt)) {
+    args[options.get(opt)] = value || true;
+  } else {
+    console.error(
+      `Unrecognized option: ${arg}\n` +
+        `Try '${toolName} --help' for more information`
+    );
+    process.exit(1);
+  }
+}
 
 const printLabels = labels => {
   if (!Array.isArray(labels)) labels = [labels];
@@ -17,116 +82,83 @@ const printLabels = labels => {
   );
 };
 
-cli
-  .usage('$0 <options>')
-  .option('user', {
-    type: 'string',
-    description: 'github username',
-    alias: 'u',
-  })
-  .option('token', {
-    type: 'string',
-    description: 'github access token',
-    alias: 't',
-  })
-  .option('src-repo', {
-    type: 'string',
-    description: "Source repository. e.g. 'metarhia/tools'",
-    alias: 's',
-  })
-  .option('dst-repo', {
-    type: 'string',
-    description: "Destination repository. e.g. 'metarhia/tools'",
-    alias: 'd',
-  })
-  .option('src-file', {
-    type: 'string',
-    description: 'File to read labels from',
-  })
-  .option('dst-file', {
-    type: 'string',
-    description: 'File to write labels to',
-  })
-  .option('delete-before-copy', {
-    type: 'boolean',
-    description: 'Delete all labels in destination repository before copy',
-    alias: 'd',
-    default: false,
-  })
-  .option('update-existing-labels', {
-    type: 'boolean',
-    description: 'Update existing labels with the same name',
-    alias: 'e',
-    default: false,
-  })
-  .option('config', {
-    description: 'Path to config file',
-    type: 'string',
-    alias: 'c',
-  })
-  .conflict('dst-file', 'dst-repo')
-  .conflict('src-file', 'src-repo')
-  .conflict('src-file', 'dst-file')
-  .command('get', 'Get labels from repository', args => {
-    const handler = new LabelHandler({
-      repo: args.srcRepo,
-      user: args.user,
-      token: args.token,
-    });
-    handler
-      .get()
-      .then(printLabels, err => console.error('Cannot get labels', err));
-  });
+const readDump = async file => {
+  const readFile = util.promisify(fs.readFile);
+  let data;
+  try {
+    data = await readFile(file);
+  } catch (err) {
+    console.error(`Error reading file: ${file}`);
+    process.exit(1);
+  }
+  return JSON.parse(data);
+};
 
-const readDump = file =>
-  new Promise((resolve, reject) => {
-    fs.readFile(file, 'utf8', (err, data) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      let result;
-      try {
-        result = JSON.parse(data);
-      } catch (e) {
-        err = e;
-      }
-      if (err) reject(err);
-      else resolve(result);
-    });
-  });
-
-const writeDump = (file, data) => {
+const writeDump = async (file, data) => {
   const result = data.map(label => ({
     name: label.name,
     color: label.color,
     description: label.description,
   }));
-  return new Promise((resolve, reject) => {
-    fs.writeFile(file, JSON.stringify(result, null, 2), err => {
-      if (err) reject(err);
-      else resolve(data);
-    });
-  });
+
+  const writeFile = util.promisify(fs.writeFile);
+  try {
+    data = await writeFile(file, JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.error(`Error reading file: ${file}`, err);
+    process.exit(1);
+  }
 };
 
 const copy = async args => {
+  if (args.config) args = { ...args, ...(await readDump(args.config)) };
+
+  if (args.srcFile && args.srcRepo) {
+    console.error('Only `src-repo` or `src-file` should be specified');
+    process.exit(1);
+  }
+  if (args.srcFile && args.dstFile) {
+    console.error('Only `src-file` or `dst-file` should be specified');
+    process.exit(1);
+  }
+
   const handler = new LabelHandler({
     repo: args.dstRepo,
     user: args.user,
     token: args.token,
   });
-  if (!args.dstFile && args.deleteBeforeCopy) await handler.delete();
+  if (!args.dstFile && args.delete) {
+    try {
+      await handler.delete();
+    } catch (err) {
+      console.error('Cannot delete labels', err);
+      process.exit(1);
+    }
+  }
 
+  let labels;
   if (args.dstFile) {
-    const labels = await handler.getFrom(args.srcRepo);
-    return await writeDump(args.dstFile, labels);
+    try {
+      labels = await handler.getFrom(args.srcRepo);
+    } catch (err) {
+      console.error('Cannot get labels', err);
+      process.exit(1);
+    }
+    await writeDump(args.dstFile, labels);
+    return labels;
   } else {
-    const labels = args.srcFile ? await readDump(args.srcFile) : args.srcRepo;
-    return await handler.copyFrom(labels, args.updateExistingLabels);
+    labels = args.srcFile ? await readDump(args.srcFile) : args.srcRepo;
+    try {
+      labels = await handler.copyFrom(labels, args.update);
+    } catch (err) {
+      console.error('Cannot copy labels', err);
+      process.exit(1);
+    }
+    return labels;
   }
 };
 
-cli.parse(process.argv, args => {
-  copy(args).then(printLabels, err => console.error('Cannot copy labels', err));
+copy(args).then(printLabels, err => {
+  console.error(err);
+  process.exit(1);
 });
