@@ -25,8 +25,8 @@ Usage: ${toolName} [--config=path] [--user=user] [--token=token]
 
 Options:
   --config   Path to config file
-  --user     github username
-  --token    github access token
+  --user     Github username
+  --token    Github access token
   --src-repo Source repository. e.g. 'metarhia/tools'
   --dst-repo Destination repository. e.g. 'metarhia/tools'
   --src-file File to read labels from
@@ -113,19 +113,15 @@ const writeDump = async (file, data) => {
 const copy = async args => {
   if (args.config) args = { ...args, ...(await readDump(args.config)) };
 
-  if (args.srcFile && args.srcRepo) {
-    console.error('Only `src-repo` or `src-file` should be specified');
-    process.exit(1);
-  }
   if (args.srcFile && args.dstFile) {
     console.error('Only `src-file` or `dst-file` should be specified');
     process.exit(1);
   }
-  if (!args.srcFile && !args.srcRepo) {
+  if ((!args.srcFile && !args.srcRepo) || (args.srcFile && args.srcRepo)) {
     console.error('Either `src-file` or `src-repo` should be specified');
     process.exit(1);
   }
-  if (!args.dstFile && !args.dstRepo) {
+  if ((!args.dstFile && !args.dstRepo) || (args.dstFile && args.dstRepo)) {
     console.error('Either `dst-file` or `dst-repo` should be specified');
     process.exit(1);
   }
