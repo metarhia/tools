@@ -11,15 +11,11 @@ const { LabelHandler } = require('../lib/labels.js');
 const toolName = path.basename(process.argv[1]);
 const toolVersion = require('../package.json').version;
 
-const padding = ' '.repeat(toolName.length);
-
 const help = `\
-This tool copies labels from source repository or file to destination
-repository or file.
+This tool copies labels from source repository or json file to destination
+repository or json file.
 
-Usage: ${toolName} [--config=path] [--user=user] [--token=token]
-       ${padding} [--src-repo=repo] [--dst-repo=repo] [--src-file=path]
-       ${padding} [--dst-file=path] [--delete] [--update]
+Usage: ${toolName} [OPTION]... SOURCE DEST
        ${toolName} --help
        ${toolName} --version
 
@@ -27,10 +23,6 @@ Options:
   --config   Path to config file
   --user     Github username
   --token    Github access token
-  --src-repo Source repository. e.g. 'metarhia/tools'
-  --dst-repo Destination repository. e.g. 'metarhia/tools'
-  --src-file File to read labels from
-  --dst-file File to write labels to
   --delete   Delete all labels in destination repository before
              copy
   --update   Update existing labels with the same name
@@ -38,16 +30,12 @@ Options:
   --version  print version and exit
 `;
 
-const args = {};
+const args = { args: [] };
 
 const options = new Map([
   ['--config', 'config'],
   ['--user', 'user'],
   ['--token', 'token'],
-  ['--src-repo', 'srcRepo'],
-  ['--dst-repo', 'dstRepo'],
-  ['--src-file', 'srcFile'],
-  ['--dst-file', 'dstFile'],
   ['--delete', 'delete'],
   ['--update', 'update'],
 ]);
@@ -62,6 +50,8 @@ for (const arg of process.argv.slice(2)) {
     process.exit(0);
   } else if (options.has(opt)) {
     args[options.get(opt)] = value || true;
+  } else if (!opt.startsWith('--')) {
+    args.args.push(opt);
   } else {
     console.error(
       `Unrecognized option: ${arg}\n` +
@@ -113,16 +103,18 @@ const writeDump = async (file, data) => {
 const copy = async args => {
   if (args.config) args = { ...args, ...(await readDump(args.config)) };
 
+  const [src, dst] = args.args;
+  if (!(src || dst)) {
+    console.error('Both SOURCE and DEST should be specified');
+    process.exit(1);
+  }
+  if (path.extname(src) === '.json') args.srcFile = src;
+  else args.srcRepo = src;
+  if (path.extname(dst) === '.json') args.dstFile = dst;
+  else args.dstRepo = dst;
+
   if (args.srcFile && args.dstFile) {
-    console.error('Only `src-file` or `dst-file` should be specified');
-    process.exit(1);
-  }
-  if ((!args.srcFile && !args.srcRepo) || (args.srcFile && args.srcRepo)) {
-    console.error('Either `src-file` or `src-repo` should be specified');
-    process.exit(1);
-  }
-  if ((!args.dstFile && !args.dstRepo) || (args.dstFile && args.dstRepo)) {
-    console.error('Either `dst-file` or `dst-repo` should be specified');
+    console.error('Either SOURCE or DEST should be repository');
     process.exit(1);
   }
 
