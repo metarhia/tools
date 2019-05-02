@@ -121,6 +121,14 @@ const copy = async args => {
     console.error('Only `src-file` or `dst-file` should be specified');
     process.exit(1);
   }
+  if (!args.srcFile && !args.srcRepo) {
+    console.error('Either `src-file` or `src-repo` should be specified');
+    process.exit(1);
+  }
+  if (!args.dstFile && !args.dstRepo) {
+    console.error('Either `dst-file` or `dst-repo` should be specified');
+    process.exit(1);
+  }
 
   const handler = new LabelHandler({
     repo: args.dstRepo,
