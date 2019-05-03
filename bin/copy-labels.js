@@ -20,14 +20,14 @@ Usage: ${toolName} [OPTION]... SOURCE DEST
        ${toolName} --version
 
 Options:
-  --config   Path to config file
-  --user     Github username
-  --token    Github access token
-  --delete   Delete all labels in destination repository before
-             copy
-  --update   Update existing labels with the same name
-  --help     print this help message and exit
-  --version  print version and exit
+  --config  path to the config file
+  --user    GitHub username
+  --token   GitHub access token
+  --delete  delete all labels in destination repository before copy
+  --update  update existing labels with the same name
+  --dry-run print operations that will be executed and exit
+  --help    print this help message and exit
+  --version print version and exit
 `;
 
 const args = { args: [] };
@@ -38,7 +38,15 @@ const options = new Map([
   ['--token', 'token'],
   ['--delete', 'delete'],
   ['--update', 'update'],
+  ['--dry-run', 'dry'],
 ]);
+
+const helpExit = (message, error) => {
+  console.error(message);
+  console.error(error.message);
+  console.error(`\nTry '${toolName} --help' for more information`);
+  process.exit(1);
+};
 
 for (const arg of process.argv.slice(2)) {
   const [opt, value] = arg.split('=');
@@ -53,11 +61,7 @@ for (const arg of process.argv.slice(2)) {
   } else if (!opt.startsWith('--')) {
     args.args.push(opt);
   } else {
-    console.error(
-      `Unrecognized option: ${arg}\n` +
-        `Try '${toolName} --help' for more information`
-    );
-    process.exit(1);
+    helpExit('Unrecognized option:', arg);
   }
 }
 
@@ -74,14 +78,18 @@ const printLabels = labels => {
 
 const readDump = async file => {
   const readFile = util.promisify(fs.readFile);
-  let data;
+  let data, result;
   try {
     data = await readFile(file);
   } catch (err) {
-    console.error(`Error reading file: ${file}`);
-    process.exit(1);
+    helpExit('Error reading file:', file);
   }
-  return JSON.parse(data);
+  try {
+    result = JSON.parse(data);
+  } catch (err) {
+    helpExit('Cannot parse JSON file:', file);
+  }
+  return result;
 };
 
 const writeDump = async (file, data) => {
@@ -95,27 +103,27 @@ const writeDump = async (file, data) => {
   try {
     data = await writeFile(file, JSON.stringify(result, null, 2));
   } catch (err) {
-    console.error(`Error reading file: ${file}`, err);
-    process.exit(1);
+    helpExit(`Error reading file: ${file}`, err);
   }
 };
 
 const copy = async args => {
-  if (args.config) args = { ...args, ...(await readDump(args.config)) };
+  if (args.config) {
+    const { user, token } = await readDump(args.config);
+    args = { user, token, ...args };
+  }
 
   const [src, dst] = args.args;
-  if (!(src || dst)) {
-    console.error('Both SOURCE and DEST should be specified');
-    process.exit(1);
-  }
+  if (!src) helpExit('missing source repository or file');
+  if (!dst) helpExit('missing destination repository or file');
+
   if (path.extname(src) === '.json') args.srcFile = src;
   else args.srcRepo = src;
   if (path.extname(dst) === '.json') args.dstFile = dst;
   else args.dstRepo = dst;
 
   if (args.srcFile && args.dstFile) {
-    console.error('Either SOURCE or DEST should be repository');
-    process.exit(1);
+    helpExit('Either source or destination should be repository');
   }
 
   const handler = new LabelHandler({
@@ -123,12 +131,19 @@ const copy = async args => {
     user: args.user,
     token: args.token,
   });
-  if (!args.dstFile && args.delete) {
-    try {
-      await handler.delete();
-    } catch (err) {
-      console.error('Cannot delete labels', err);
-      process.exit(1);
+
+  if (args.dry) console.log('This is a dry run, no changes will be made\n');
+
+  if (args.dstRepo && args.delete) {
+    if (args.dry) {
+      console.log(`Delete following labels from ${args.dstRepo}`);
+      printLabels(await handler.get());
+    } else {
+      try {
+        await handler.delete();
+      } catch (err) {
+        helpExit('Cannot delete labels', err);
+      }
     }
   }
 
@@ -137,24 +152,51 @@ const copy = async args => {
     try {
       labels = await handler.getFrom(args.srcRepo);
     } catch (err) {
-      console.error('Cannot get labels', err);
-      process.exit(1);
+      helpExit('Cannot get labels', err);
     }
-    await writeDump(args.dstFile, labels);
-    return labels;
+    if (args.dry) {
+      console.log(
+        `Write following labels ` +
+          `from repository '${args.srcRepo}' to file '${args.dstFile}'`
+      );
+      printLabels(labels);
+    } else {
+      await writeDump(args.dstFile, labels);
+    }
   } else {
-    labels = args.srcFile ? await readDump(args.srcFile) : args.srcRepo;
-    try {
-      labels = await handler.copyFrom(labels, args.update);
-    } catch (err) {
-      console.error('Cannot copy labels', err);
-      process.exit(1);
+    labels = await (args.srcFile
+      ? readDump(args.srcFile)
+      : handler.getFrom(args.srcRepo));
+    if (args.dry) {
+      let msg = 'Copy the following labels from ';
+      if (args.srcFile) {
+        msg += `file '${args.srcFile}'`;
+      } else {
+        msg += `repository '${args.srcRepo}'`;
+      }
+      console.log(msg);
+      printLabels(labels);
+      msg = `to repository ${args.dstRepo} with following labels`;
+      if (args.update) msg += ' updating existing labels';
+      console.log(msg);
+      printLabels(await handler.get());
+    } else {
+      process.exit();
+      try {
+        labels = await handler.copyFrom(labels, args.update);
+      } catch (err) {
+        helpExit('Cannot copy labels', err);
+      }
     }
-    return labels;
   }
+  return labels;
 };
 
-copy(args).then(printLabels, err => {
-  console.error(err);
-  process.exit(1);
-});
+copy(args).then(
+  labels => {
+    if (!args.dry) printLabels(labels);
+  },
+  err => {
+    helpExit('Cannot copy labels', err);
+  }
+);
