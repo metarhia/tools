@@ -134,10 +134,19 @@ const copy = async args => {
 
   if (args.dry) console.log('This is a dry run, no changes will be made\n');
 
+  let usedLabels = new Map();
   if (args.dstRepo && args.delete) {
     if (args.dry) {
-      console.log(`Delete following labels from ${args.dstRepo}`);
-      printLabels(await handler.get());
+      const labels = await handler.get();
+      usedLabels = await handler.getUsedLabels(args.dstRepo);
+      console.log(`Delete following labels from '${args.dstRepo}'`);
+      printLabels(labels.filter(({ name }) => !usedLabels.has(name)));
+      if (usedLabels.size) {
+        console.error(
+          `The following labels have related issues and won't be deleted`
+        );
+        console.table(usedLabels);
+      }
     } else {
       try {
         await handler.delete();
@@ -167,21 +176,67 @@ const copy = async args => {
     labels = await (args.srcFile
       ? readDump(args.srcFile)
       : handler.getFrom(args.srcRepo));
+    const existingLabels = await handler.get();
     if (args.dry) {
-      let msg = 'Copy the following labels from ';
+      let msg = 'Copy the following labels from';
       if (args.srcFile) {
-        msg += `file '${args.srcFile}'`;
+        msg += ` file '${args.srcFile}'`;
       } else {
-        msg += `repository '${args.srcRepo}'`;
+        msg += ` repository '${args.srcRepo}'`;
       }
-      console.log(msg);
-      printLabels(labels);
-      msg = `to repository ${args.dstRepo} with following labels`;
+      msg += ` to repository '${args.dstRepo}'`;
       if (args.update) msg += ' updating existing labels';
       console.log(msg);
-      printLabels(await handler.get());
+      console.log('Following labels will be added:');
+      printLabels(
+        labels.filter(label => {
+          for (const existingLabel of existingLabels) {
+            if (existingLabel.name === label.name) {
+              return args.delete && !usedLabels.has(label.name);
+            }
+          }
+          return true;
+        })
+      );
+      if (args.update) {
+        console.log('Following labels will be updated:');
+        console.log('from:');
+        printLabels(
+          labels.filter(label => {
+            for (const existingLabel of existingLabels) {
+              if (existingLabel.name === label.name) {
+                return !args.delete || usedLabels.has(label.name);
+              }
+            }
+            return false;
+          })
+        );
+        console.log('to:');
+        printLabels(
+          existingLabels.filter(existingLabel => {
+            for (const label of labels) {
+              if (existingLabel.name === label.name) {
+                return !args.delete || usedLabels.has(label.name);
+              }
+            }
+            return false;
+          })
+        );
+      }
+      console.log('Following labels will not be changed:');
+      printLabels(
+        existingLabels.filter(existingLabel => {
+          for (const label of labels) {
+            if (existingLabel.name === label.name) {
+              return (
+                !args.update && (!args.delete || usedLabels.has(label.name))
+              );
+            }
+          }
+          return true;
+        })
+      );
     } else {
-      process.exit();
       try {
         labels = await handler.copyFrom(labels, args.update);
       } catch (err) {
