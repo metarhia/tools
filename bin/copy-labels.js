@@ -43,7 +43,7 @@ const options = new Map([
 
 const helpExit = (message, error) => {
   console.error(message);
-  console.error(error.message);
+  if (error) console.error(error.message);
   console.error(`\nTry '${toolName} --help' for more information`);
   process.exit(1);
 };
