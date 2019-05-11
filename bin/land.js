@@ -4,20 +4,33 @@
 
 const childProcess = require('child_process');
 const https = require('https');
+const path = require('path');
 
 const arg = process.argv.slice(2);
 const landedBranch = arg[0];
+const toolName = path.basename(process.argv[1]);
+
+const help = `\
+This a Pull Request landing tool that will automatically pick up commits from
+the branch add metadata to them and merge into the specified branch.
+
+Usage: ${toolName} <landed-branch> [--rebase] [--autosquash] [--squash-all] [--cherry-pick]
+       ${toolName} --help
+
+Options:
+  --rebase        start interactive rebase of the source branch
+  --autosquash    move commits that begin with squash!/fixup! under -i
+  --squash-all    apply squash command on all commits (except first) and prompt
+                  user for the resulting commit message
+  --cherry-pick   apply commits from source branch onto <landed-branch>
+  --help          print this help message and exit
+`;
 
 const differCommits = () =>
   parseInt(childProcess.execSync(`git rev-list --count master..HEAD`));
 
-const supportCommits = () => {
-  const git = childProcess.spawn('git', [
-    'rebase',
-    '-i',
-    '--autosquash',
-    `HEAD~10`,
-  ]);
+const userInteraction = options => {
+  const git = childProcess.spawn('git', options);
   process.stdin.setRawMode(true);
   process.stdin.pipe(git.stdin);
   git.stdout.pipe(process.stdout);
@@ -28,33 +41,17 @@ const supportCommits = () => {
   });
 };
 
+const supportCommits = () => {
+  userInteraction(['rebase', '-i', '--autosquash', `HEAD~${differCommits()}`]);
+};
+
 const supportRebase = () => {
-  const git = childProcess.spawn('git', [
-    'rebase',
-    '-i',
-    `HEAD~${differCommits()}`,
-  ]);
-  process.stdin.setRawMode(true);
-  process.stdin.pipe(git.stdin);
-  git.stdout.pipe(process.stdout);
-  git.stdout.on('close', code => {
-    if (code !== 0) {
-      process.exit(code);
-    }
-  });
+  userInteraction(['rebase', '-i', `HEAD~${differCommits()}`]);
 };
 
 const supportSquashAll = () => {
   childProcess.execSync(`git reset --soft HEAD~${differCommits()}`);
-  const git = childProcess.spawn('git', ['commit']);
-  process.stdin.setRawMode(true);
-  process.stdin.pipe(git.stdin);
-  git.stdout.pipe(process.stdout);
-  git.stdout.on('close', code => {
-    if (code !== 0) {
-      process.exit(code);
-    }
-  });
+  userInteraction(['commit']);
 };
 
 const cherryPick = commitsList => {
@@ -88,13 +85,20 @@ const httpsGet = (commitMessage, options) => {
 };
 
 const getPRURL = () => {
-  const gitConfig = childProcess.execSync('git config --get remote.origin.url');
+  if (arg.includes('--help') || arg.includes('-h')) {
+    console.log(help);
+    process.exit(0);
+  }
 
   if (arg.includes('--rebase')) supportRebase();
 
-  if (arg.includes('--fix-squash')) supportCommits();
+  if (arg.includes('--autosquash')) supportCommits();
 
   if (arg.includes('--squash-all')) supportSquashAll();
+
+  const gitConfig = childProcess
+    .execSync('git config --get remote.origin.url')
+    .toString();
 
   const repoName = gitConfig.slice(
     gitConfig.indexOf(':') + 1,
@@ -103,8 +107,8 @@ const getPRURL = () => {
 
   const gitLog = childProcess
     .execSync('git log -1 --pretty=format:%B')
-    .toString('utf8');
-  if (!gitLog.includes('PR-URL')) {
+    .toString();
+  if (!gitLog.includes('PR-URL:')) {
     const options = {
       path: `/search/issues?q=repo:${repoName}+is:pr+head:${landedBranch}`,
       headers: {
@@ -119,7 +123,7 @@ const getPRURL = () => {
   if (arg.includes('--cherry-pick')) {
     const commitsList = childProcess
       .execSync(`git log -${differCommits()} --pretty=format:%h`)
-      .toString('utf8')
+      .toString()
       .split('\n')
       .reverse()
       .join(' ');
