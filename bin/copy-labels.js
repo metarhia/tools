@@ -30,8 +30,6 @@ Options:
   --version print version and exit
 `;
 
-const args = { args: [] };
-
 const options = new Map([
   ['--config', 'config'],
   ['--user', 'user'],
@@ -48,22 +46,26 @@ const helpExit = (message, error) => {
   process.exit(1);
 };
 
-for (const arg of process.argv.slice(2)) {
-  const [opt, value] = arg.split('=');
-  if (opt.startsWith('--help') || opt.startsWith('-h')) {
-    console.log(help);
-    process.exit(0);
-  } else if (opt.startsWith('--version') || arg.startsWith('-v')) {
-    console.log(toolVersion);
-    process.exit(0);
-  } else if (options.has(opt)) {
-    args[options.get(opt)] = value || true;
-  } else if (!opt.startsWith('--')) {
-    args.args.push(opt);
-  } else {
-    helpExit('Unrecognized option:', arg);
+const getArgs = () => {
+  const args = { args: [] };
+  for (const arg of process.argv.slice(2)) {
+    const [opt, value] = arg.split('=');
+    if (opt.startsWith('--help') || opt.startsWith('-h')) {
+      console.log(help);
+      process.exit(0);
+    } else if (opt.startsWith('--version') || arg.startsWith('-v')) {
+      console.log(toolVersion);
+      process.exit(0);
+    } else if (options.has(opt)) {
+      args[options.get(opt)] = value || true;
+    } else if (!opt.startsWith('--')) {
+      args.args.push(opt);
+    } else {
+      helpExit('Unrecognized option:' + arg);
+    }
   }
-}
+  return args;
+};
 
 const printLabels = labels => {
   if (!Array.isArray(labels)) labels = [labels];
@@ -82,12 +84,12 @@ const readDump = async file => {
   try {
     data = await readFile(file);
   } catch (err) {
-    helpExit('Error reading file:', file);
+    helpExit('Error reading file:' + file, err);
   }
   try {
     result = JSON.parse(data);
   } catch (err) {
-    helpExit('Cannot parse JSON file:', file);
+    helpExit('Cannot parse JSON file:' + file, err);
   }
   return result;
 };
@@ -103,11 +105,168 @@ const writeDump = async (file, data) => {
   try {
     data = await writeFile(file, JSON.stringify(result, null, 2));
   } catch (err) {
-    helpExit(`Error reading file: ${file}`, err);
+    helpExit(`Error writing file: ${file}`, err);
   }
 };
 
-const copy = async args => {
+const dryDelete = async (args, handler) => {
+  const labels = await handler.get();
+  const usedLabels = await handler.getUsedLabels(args.dstRepo);
+  console.log(`Delete following labels from '${args.dstRepo}'`);
+  printLabels(labels.filter(({ name }) => !usedLabels.has(name)));
+  if (usedLabels.size) {
+    console.error(
+      `The following labels have related issues and won't be deleted`
+    );
+    console.table(usedLabels);
+  }
+  return usedLabels;
+};
+
+const deleteLabels = async (args, handler) => {
+  let usedLabels = new Map();
+  if (args.dry) {
+    try {
+      usedLabels = await dryDelete(args, handler);
+    } catch (err) {
+      helpExit('Cannot delete labels(dry)', err);
+    }
+  } else {
+    try {
+      await handler.delete();
+    } catch (err) {
+      helpExit('Cannot delete labels', err);
+    }
+  }
+  return usedLabels;
+};
+
+const printAddedLabels = (args, labels, existingLabels, usedLabels) => {
+  console.log('Following labels will be added:');
+  printLabels(
+    labels.filter(label => {
+      for (const existingLabel of existingLabels) {
+        if (existingLabel.name === label.name) {
+          return args.delete && !usedLabels.has(label.name);
+        }
+      }
+      return true;
+    })
+  );
+};
+
+const printUpdatedLabels = (args, labels, existingLabels, usedLabels) => {
+  console.log('Following labels will be updated:');
+  console.log('from:');
+  printLabels(
+    labels.filter(label => {
+      for (const existingLabel of existingLabels) {
+        if (existingLabel.name === label.name) {
+          return !args.delete || usedLabels.has(label.name);
+        }
+      }
+      return false;
+    })
+  );
+  console.log('to:');
+  printLabels(
+    existingLabels.filter(existingLabel => {
+      for (const label of labels) {
+        if (existingLabel.name === label.name) {
+          return !args.delete || usedLabels.has(label.name);
+        }
+      }
+      return false;
+    })
+  );
+};
+
+const printUnchangedLabels = (args, labels, existingLabels, usedLabels) => {
+  console.log('Following labels will not be changed:');
+  printLabels(
+    existingLabels.filter(existingLabel => {
+      for (const label of labels) {
+        if (existingLabel.name === label.name) {
+          return !args.update && (!args.delete || usedLabels.has(label.name));
+        }
+      }
+      return true;
+    })
+  );
+};
+
+const getExistingLabels = async handler => {
+  let existingLabels;
+  try {
+    existingLabels = await handler.get();
+  } catch (err) {
+    helpExit('Cannot get existing labels', err);
+  }
+  return existingLabels;
+};
+
+const dryCopyLabels = async (args, handler, labels, usedLabels) => {
+  if (args.dstFile) {
+    console.log(
+      `Write following labels ` +
+        `from repository '${args.srcRepo}' to file '${args.dstFile}'`
+    );
+    printLabels(labels);
+  } else {
+    const existingLabels = await getExistingLabels(handler);
+    let msg = 'Copy the following labels from';
+    if (args.srcFile) {
+      msg += ` file '${args.srcFile}'`;
+    } else {
+      msg += ` repository '${args.srcRepo}'`;
+    }
+    msg += ` to repository '${args.dstRepo}'`;
+    if (args.update) msg += ' updating existing labels';
+    console.log(msg);
+    printAddedLabels(args, labels, existingLabels, usedLabels);
+    if (args.update) {
+      printUpdatedLabels(args, labels, existingLabels, usedLabels);
+    }
+    printUnchangedLabels(args, labels, existingLabels, usedLabels);
+  }
+};
+
+const copyLabels = async (args, handler, labels) => {
+  if (args.dstFile) {
+    try {
+      await writeDump(args.dstFile, labels);
+    } catch (err) {
+      helpExit('Cannot write dump', err);
+    }
+  } else {
+    try {
+      labels = await handler.copyFrom(labels, args.update);
+    } catch (err) {
+      helpExit('Cannot copy labels', err);
+    }
+  }
+  return labels;
+};
+
+const getLabels = async (args, handler) => {
+  let labels;
+  if (args.srcFile) {
+    try {
+      labels = await readDump(args.srcFile);
+    } catch (err) {
+      helpExit('Cannot read dump', err);
+    }
+  } else {
+    try {
+      labels = await handler.getFrom(args.srcRepo);
+    } catch (err) {
+      helpExit('Cannot read dump', err);
+    }
+  }
+  return labels;
+};
+
+const getConfig = async args => {
   if (args.config) {
     const { user, token } = await readDump(args.config);
     args = { user, token, ...args };
@@ -125,7 +284,11 @@ const copy = async args => {
   if (args.srcFile && args.dstFile) {
     helpExit('Either source or destination should be repository');
   }
+  return args;
+};
 
+const copy = async args => {
+  args = await getConfig(args);
   const handler = new LabelHandler({
     repo: args.dstRepo,
     user: args.user,
@@ -136,117 +299,18 @@ const copy = async args => {
 
   let usedLabels = new Map();
   if (args.dstRepo && args.delete) {
-    if (args.dry) {
-      const labels = await handler.get();
-      usedLabels = await handler.getUsedLabels(args.dstRepo);
-      console.log(`Delete following labels from '${args.dstRepo}'`);
-      printLabels(labels.filter(({ name }) => !usedLabels.has(name)));
-      if (usedLabels.size) {
-        console.error(
-          `The following labels have related issues and won't be deleted`
-        );
-        console.table(usedLabels);
-      }
-    } else {
-      try {
-        await handler.delete();
-      } catch (err) {
-        helpExit('Cannot delete labels', err);
-      }
-    }
+    usedLabels = await deleteLabels(args, handler);
   }
 
-  let labels;
-  if (args.dstFile) {
-    try {
-      labels = await handler.getFrom(args.srcRepo);
-    } catch (err) {
-      helpExit('Cannot get labels', err);
-    }
-    if (args.dry) {
-      console.log(
-        `Write following labels ` +
-          `from repository '${args.srcRepo}' to file '${args.dstFile}'`
-      );
-      printLabels(labels);
-    } else {
-      await writeDump(args.dstFile, labels);
-    }
+  const labels = await getLabels(args, handler);
+  if (args.dry) {
+    await dryCopyLabels(args, handler, labels, usedLabels);
   } else {
-    labels = await (args.srcFile
-      ? readDump(args.srcFile)
-      : handler.getFrom(args.srcRepo));
-    const existingLabels = await handler.get();
-    if (args.dry) {
-      let msg = 'Copy the following labels from';
-      if (args.srcFile) {
-        msg += ` file '${args.srcFile}'`;
-      } else {
-        msg += ` repository '${args.srcRepo}'`;
-      }
-      msg += ` to repository '${args.dstRepo}'`;
-      if (args.update) msg += ' updating existing labels';
-      console.log(msg);
-      console.log('Following labels will be added:');
-      printLabels(
-        labels.filter(label => {
-          for (const existingLabel of existingLabels) {
-            if (existingLabel.name === label.name) {
-              return args.delete && !usedLabels.has(label.name);
-            }
-          }
-          return true;
-        })
-      );
-      if (args.update) {
-        console.log('Following labels will be updated:');
-        console.log('from:');
-        printLabels(
-          labels.filter(label => {
-            for (const existingLabel of existingLabels) {
-              if (existingLabel.name === label.name) {
-                return !args.delete || usedLabels.has(label.name);
-              }
-            }
-            return false;
-          })
-        );
-        console.log('to:');
-        printLabels(
-          existingLabels.filter(existingLabel => {
-            for (const label of labels) {
-              if (existingLabel.name === label.name) {
-                return !args.delete || usedLabels.has(label.name);
-              }
-            }
-            return false;
-          })
-        );
-      }
-      console.log('Following labels will not be changed:');
-      printLabels(
-        existingLabels.filter(existingLabel => {
-          for (const label of labels) {
-            if (existingLabel.name === label.name) {
-              return (
-                !args.update && (!args.delete || usedLabels.has(label.name))
-              );
-            }
-          }
-          return true;
-        })
-      );
-    } else {
-      try {
-        labels = await handler.copyFrom(labels, args.update);
-      } catch (err) {
-        helpExit('Cannot copy labels', err);
-      }
-    }
+    await copyLabels(args, handler, labels);
   }
-  return labels;
 };
 
+const args = getArgs();
 copy(args).then(
   labels => {
     if (!args.dry) printLabels(labels);
