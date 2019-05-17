@@ -23,7 +23,7 @@ Options:
   --config  path to the config file
   --user    GitHub username
   --token   GitHub access token
-  --delete  delete all labels in destination repository before copy
+  --delete  delete unused labels in destination repository before copy
   --update  update existing labels with the same name
   --dry-run print operations that will be executed and exit
   --help    print this help message and exit
