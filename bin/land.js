@@ -9,21 +9,29 @@ const path = require('path');
 const arg = process.argv.slice(2);
 const landedBranch = arg[0];
 const toolName = path.basename(process.argv[1]);
+const toolVersion = require('../package.json').version;
 
 const help = `\
 This a Pull Request landing tool that will automatically pick up commits from
 the branch add metadata to them and merge into the specified branch.
 
-Usage: ${toolName} <landed-branch> [--rebase] [--autosquash] [--squash-all] [--cherry-pick]
+Usage: ${toolName} <landed-branch> [OPTION]
        ${toolName} --help
+       ${toolName} --version
 
 Options:
+  --user          GitHub username
+  --token         GitHub access token
   --rebase        start interactive rebase of the source branch
   --autosquash    move commits that begin with squash!/fixup! under -i
   --squash-all    apply squash command on all commits (except first) and prompt
                   user for the resulting commit message
   --cherry-pick   apply commits from source branch onto <landed-branch>
+  --landed        allow to automatically comment Landed in ... in the PR
+  --push          push last commit into specified branch
+  --merge         merge last commit into specified branch
   --help          print this help message and exit
+  --version       print version and exit
 `;
 
 const differCommits = () =>
@@ -52,6 +60,10 @@ const supportRebase = () => {
 const supportSquashAll = () => {
   childProcess.execSync(`git reset --soft HEAD~${differCommits()}`);
   userInteraction(['commit']);
+};
+
+const supportMerge = lastCommitHash => {
+  userInteraction(['merge', `${lastCommitHash}`]);
 };
 
 const cherryPick = commitsList => {
@@ -87,6 +99,9 @@ const httpsGet = (commitMessage, options) => {
 const getPRURL = () => {
   if (arg.includes('--help') || arg.includes('-h')) {
     console.log(help);
+    process.exit(0);
+  } else if (arg.includes('--version')) {
+    console.log(toolVersion);
     process.exit(0);
   }
 
@@ -129,6 +144,71 @@ const getPRURL = () => {
       .join(' ');
 
     cherryPick(commitsList);
+  }
+
+  const lastCommitHash = childProcess
+    .execSync('git log -1 --pretty=format:%h')
+    .toString();
+
+  if (arg.includes('--landed')) {
+    let user, token;
+    if (arg.startsWith('--user=')) {
+      user = arg.split('=')[1];
+    }
+
+    if (arg.startsWith('--token=')) {
+      token = arg.split('=')[1];
+    }
+
+    const postData = JSON.stringify({ body: `Landed in ${lastCommitHash}` });
+
+    const getIssueNumber = () => {
+      const issueNumber = childProcess
+        .execSync('git log -1 --pretty=format:%B')
+        .toString();
+      return path.basename(issueNumber).replace('\n', '');
+    };
+
+    const options = {
+      host: 'api.github.com',
+      method: 'POST',
+      path: `/repos/${repoName}/issues/${getIssueNumber()}/comments`,
+      headers: {
+        'User-Agent': `${user}`,
+        accept: 'application/vnd.github.symmetra-preview+json',
+        authorization: `token ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+    };
+
+    const req = https.request(options);
+    req.on('error', err => {
+      console.error(err);
+      process.exit(1);
+    });
+    req.write(postData);
+    req.end();
+  }
+
+  const isLandedBranch = () => {
+    const currentBranch = childProcess
+      .execSync(`git rev-parse --abbrev-ref HEAD`)
+      .toString()
+      .replace('\n', '');
+    if (currentBranch !== landedBranch) {
+      childProcess.execSync(`git checkout ${landedBranch}`);
+    }
+  };
+
+  if (arg.includes('--push')) {
+    isLandedBranch();
+    childProcess.execSync('git push');
+  }
+
+  if (arg.includes('--merge')) {
+    isLandedBranch();
+    supportMerge(lastCommitHash);
   }
 };
 
