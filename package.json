@@ -13,6 +13,9 @@
     "fmt": "prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\" \"**/*.yml\" \"**/.*rc\"",
     "test": "npm run -s lint"
   },
+  "engines": {
+    "node": ">=8.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/metarhia/tools.git"
