@@ -2,7 +2,6 @@
   "name": "@metarhia/tools",
   "version": "0.1.0",
   "description": "Metarhia development tools",
-  "main": "tools.js",
   "bin": {
     "metarhia-update-authors": "./bin/update-authors.js"
   },
