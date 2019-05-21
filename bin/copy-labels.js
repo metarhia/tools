@@ -50,15 +50,15 @@ const getArgs = () => {
   const args = { args: [] };
   for (const arg of process.argv.slice(2)) {
     const [opt, value] = arg.split('=');
-    if (opt.startsWith('--help') || opt.startsWith('-h')) {
+    if (opt.startsWith('--help')) {
       console.log(help);
       process.exit(0);
-    } else if (opt.startsWith('--version') || arg.startsWith('-v')) {
+    } else if (opt.startsWith('--version')) {
       console.log(toolVersion);
       process.exit(0);
     } else if (options.has(opt)) {
       args[options.get(opt)] = value || true;
-    } else if (!opt.startsWith('--')) {
+    } else if (!opt.startsWith('--') && args.args.length < 2) {
       args.args.push(opt);
     } else {
       helpExit('Unrecognized option:' + arg);
