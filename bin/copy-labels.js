@@ -308,6 +308,7 @@ const copy = async args => {
   } else {
     await copyLabels(args, handler, labels);
   }
+  return labels;
 };
 
 const args = getArgs();
