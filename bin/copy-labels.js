@@ -190,7 +190,7 @@ const printUnchangedLabels = (args, labels, existingLabels, usedLabels) => {
           return !args.update && (!args.delete || usedLabels.has(label.name));
         }
       }
-      return true;
+      return !args.delete || usedLabels.has(existingLabel.name);
     })
   );
 };
