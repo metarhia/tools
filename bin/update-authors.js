@@ -104,13 +104,12 @@ const linereader = readline.createInterface({
   historySize: 0,
 });
 
-const authors = new Set();
+let authors = new Set();
 
 linereader.on('line', line => {
   if (line.startsWith(authorMarker)) {
     line = line.substring(authorMarker.length);
   } else if (line.startsWith(coauthorMarker)) {
-    // TODO add .mailmap support for coauthors
     line = line.substring(coauthorMarker.length);
   } else {
     return;
@@ -121,7 +120,24 @@ linereader.on('line', line => {
   authors.add(line);
 });
 
+const mailmapAuthors = async () => {
+  const mailmappedAuthors = new Set();
+  const exec = util.promisify(childProcess.exec);
+  for (const author of authors) {
+    const { stdout: contact } = await exec(
+      `git check-mailmap ${JSON.stringify(author)}`
+    );
+    mailmappedAuthors.add(contact.trim());
+  }
+  authors = mailmappedAuthors;
+};
+
 linereader.once('close', async () => {
+  await mailmapAuthors().catch(err => {
+    console.error(`Failed to mailmap authors: ${err}`);
+    process.exit(1);
+  });
+
   if (!outputPath) {
     for (const author of authors) {
       console.log(author);
