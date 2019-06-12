@@ -5,11 +5,13 @@
 const childProcess = require('child_process');
 const https = require('https');
 const path = require('path');
+const util = require('util');
 
 const arg = process.argv.slice(2);
 const landedBranch = arg[0];
 const toolName = path.basename(process.argv[1]);
 const toolVersion = require('../package.json').version;
+const exec = util.promisify(childProcess.exec);
 
 const help = `\
 This a Pull Request landing tool that will automatically pick up commits from
@@ -34,9 +36,6 @@ Options:
   --version       print version and exit
 `;
 
-const differCommits = () =>
-  parseInt(childProcess.execSync(`git rev-list --count master..HEAD`));
-
 const userInteraction = options => {
   const git = childProcess.spawn('git', options);
   process.stdin.setRawMode(true);
@@ -49,26 +48,37 @@ const userInteraction = options => {
   });
 };
 
-const supportCommits = () => {
-  userInteraction(['rebase', '-i', '--autosquash', `HEAD~${differCommits()}`]);
-};
+async function differCommits() {
+  const { stdout, stderr } = await exec(`git rev-list --count master..HEAD`);
+  if (stderr) {
+    console.error(stderr);
+    process.exit(1);
+  }
 
-const supportRebase = () => {
-  userInteraction(['rebase', '-i', `HEAD~${differCommits()}`]);
+  return parseInt(stdout.trim());
+}
+
+const supportCommits = () => {
+  (async () => {
+    userInteraction([
+      'rebase',
+      '-i',
+      '--autosquash',
+      `HEAD~${await differCommits()}`,
+    ]);
+  })();
 };
 
 const supportSquashAll = () => {
-  childProcess.execSync(`git reset --soft HEAD~${differCommits()}`);
-  userInteraction(['commit']);
-};
-
-const supportMerge = lastCommitHash => {
-  userInteraction(['merge', `${lastCommitHash}`]);
-};
-
-const cherryPick = commitsList => {
-  childProcess.execSync(`git checkout ${landedBranch}`);
-  childProcess.execSync(`git cherry-pick ${commitsList}`);
+  (async () => {
+    childProcess.exec(`git reset --soft HEAD~${await differCommits()}`, err => {
+      if (err) {
+        console.error(err);
+        process.exit(1);
+      }
+    });
+    userInteraction(['commit']);
+  })();
 };
 
 const httpsGet = (commitMessage, options) => {
@@ -85,8 +95,14 @@ const httpsGet = (commitMessage, options) => {
         const prUrl = JSON.parse(data).items[0].html_url;
 
         const extendedCommit = `${commitMessage}\n\nPR-URL: ${prUrl}`;
-        childProcess.execSync(
-          `git commit --amend --message='${extendedCommit}'`
+        childProcess.exec(
+          `git commit --amend --message='${extendedCommit}'`,
+          err => {
+            if (err) {
+              console.error(err);
+              process.exit(1);
+            }
+          }
         );
       });
     })
@@ -96,86 +112,146 @@ const httpsGet = (commitMessage, options) => {
     });
 };
 
-const getPRURL = () => {
-  if (arg.includes('--help') || arg.includes('-h')) {
-    console.log(help);
-    process.exit(0);
-  } else if (arg.includes('--version')) {
-    console.log(toolVersion);
-    process.exit(0);
+if (arg.includes('--help') || arg.includes('-h')) {
+  console.log(help);
+  process.exit(0);
+} else if (arg.includes('--version')) {
+  console.log(toolVersion);
+  process.exit(0);
+}
+
+if (arg.includes('--rebase')) {
+  (async () => {
+    userInteraction(['rebase', '-i', `HEAD~${await differCommits()}`]);
+  })();
+}
+
+if (arg.includes('--autosquash')) supportCommits();
+
+if (arg.includes('--squash-all')) supportSquashAll();
+
+async function getRepoName() {
+  const { stdout, stderr } = await exec('git config --get remote.origin.url');
+  if (stderr) {
+    console.error(stderr);
+    process.exit(1);
   }
 
-  if (arg.includes('--rebase')) supportRebase();
+  const gitConfig = stdout.trim();
 
-  if (arg.includes('--autosquash')) supportCommits();
-
-  if (arg.includes('--squash-all')) supportSquashAll();
-
-  const gitConfig = childProcess
-    .execSync('git config --get remote.origin.url')
-    .toString();
-
-  const repoName = gitConfig.slice(
+  return gitConfig.slice(
     gitConfig.indexOf(':') + 1,
     gitConfig.lastIndexOf('.git')
   );
+}
 
-  const gitLog = childProcess
-    .execSync('git log -1 --pretty=format:%B')
-    .toString();
-  if (!gitLog.includes('PR-URL:')) {
+async function gitLog() {
+  const { stdout, stderr } = await exec('git log -1 --pretty=format:%B');
+
+  if (stderr) {
+    console.error(stderr);
+    process.exit(1);
+  }
+
+  return stdout.trim();
+}
+
+(async () => {
+  const gitLogBody = await gitLog();
+
+  if (!gitLogBody.includes('PR-URL:')) {
     const options = {
-      path: `/search/issues?q=repo:${repoName}+is:pr+head:${landedBranch}`,
+      path: `/search/issues?q=repo:${await getRepoName()}+is:pr+head:${landedBranch}`,
       headers: {
-        'User-Agent': 'request',
+        'user-agent': 'metarhia-api-landing-tool',
       },
       host: 'api.github.com',
     };
 
-    httpsGet(gitLog, options);
+    httpsGet(gitLogBody, options);
+  }
+})();
+
+const onLandedBranch = () =>
+  childProcess.exec(`git checkout ${landedBranch}`, err => {
+    if (err) {
+      console.error(err);
+      process.exit(1);
+    }
+  });
+
+async function commitsList() {
+  const { stdout, stderr } = await exec(
+    `git log -${await differCommits()} --pretty=format:%h`
+  );
+  if (stderr) {
+    console.error(stderr);
+    process.exit(1);
+  }
+  return stdout
+    .split('\n')
+    .reverse()
+    .join(' ');
+}
+
+if (arg.includes('--cherry-pick')) {
+  (async () => {
+    onLandedBranch();
+    childProcess.exec(`git cherry-pick ${await commitsList()}`, err => {
+      if (err) {
+        console.error(err);
+        process.exit(1);
+      }
+    });
+  })();
+}
+
+async function getIssueNumber() {
+  const { stdout, stderr } = await exec('git log -1 --pretty=format:%B');
+
+  if (stderr) {
+    console.error(stderr);
+    process.exit(1);
   }
 
-  if (arg.includes('--cherry-pick')) {
-    const commitsList = childProcess
-      .execSync(`git log -${differCommits()} --pretty=format:%h`)
-      .toString()
-      .split('\n')
-      .reverse()
-      .join(' ');
+  return parseInt(path.basename(stdout).trim());
+}
 
-    cherryPick(commitsList);
+async function lastCommitHash() {
+  const { stdout, stderr } = await exec('git log -1 --pretty=format:%h');
+
+  if (stderr) {
+    console.error(stderr);
+    process.exit(1);
   }
 
-  const lastCommitHash = childProcess
-    .execSync('git log -1 --pretty=format:%h')
-    .toString();
+  return stdout;
+}
 
-  if (arg.includes('--landed')) {
-    let user, token;
-    if (arg.startsWith('--user=')) {
-      user = arg.split('=')[1];
+if (arg.includes('--landed')) {
+  let user, token;
+  arg.forEach(value => {
+    if (value.startsWith('--user=')) {
+      user = value.split('=')[1];
     }
 
-    if (arg.startsWith('--token=')) {
-      token = arg.split('=')[1];
+    if (value.startsWith('--token=')) {
+      token = value.split('=')[1];
     }
+  });
 
-    const postData = JSON.stringify({ body: `Landed in ${lastCommitHash}` });
-
-    const getIssueNumber = () => {
-      const issueNumber = childProcess
-        .execSync('git log -1 --pretty=format:%B')
-        .toString();
-      return path.basename(issueNumber).replace('\n', '');
-    };
+  (async () => {
+    const postData = JSON.stringify({
+      body: `Landed in ${await lastCommitHash()}`,
+    });
 
     const options = {
       host: 'api.github.com',
       method: 'POST',
-      path: `/repos/${repoName}/issues/${getIssueNumber()}/comments`,
+      path: `/repos/${await getRepoName()}/issues/${await getIssueNumber()}/comments`,
       headers: {
-        'User-Agent': `${user}`,
-        accept: 'application/vnd.github.symmetra-preview+json',
+        'user-agent': `${user}`,
+        accept: 'application/vnd.github.v3+json',
         authorization: `token ${token}`,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(postData),
@@ -189,27 +265,32 @@ const getPRURL = () => {
     });
     req.write(postData);
     req.end();
-  }
+  })();
+}
 
-  const isLandedBranch = () => {
-    const currentBranch = childProcess
-      .execSync(`git rev-parse --abbrev-ref HEAD`)
-      .toString()
-      .replace('\n', '');
-    if (currentBranch !== landedBranch) {
-      childProcess.execSync(`git checkout ${landedBranch}`);
+async function isLandedBranch() {
+  const { stdout, stderr } = await exec(`git rev-parse --abbrev-ref HEAD`);
+  if (stderr) {
+    console.error(stderr);
+    process.exit(1);
+  }
+  const currentBranch = stdout.trim();
+  if (currentBranch !== landedBranch) {
+    onLandedBranch();
+  }
+}
+
+if (arg.includes('--push')) {
+  isLandedBranch();
+  childProcess.exec('git push', err => {
+    if (err) {
+      console.error(err);
+      process.exit(1);
     }
-  };
+  });
+}
 
-  if (arg.includes('--push')) {
-    isLandedBranch();
-    childProcess.execSync('git push');
-  }
-
-  if (arg.includes('--merge')) {
-    isLandedBranch();
-    supportMerge(lastCommitHash);
-  }
-};
-
-getPRURL();
+if (arg.includes('--merge')) {
+  isLandedBranch();
+  (async () => userInteraction(['merge', `${await lastCommitHash()}`]))();
+}
