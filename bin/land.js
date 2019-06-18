@@ -38,22 +38,25 @@ Options:
 `;
 
 const runGit = async function(options) {
-  const git = await childProcess.spawn('git', options, { stdio: 'inherit' });
-  git.on('close', code => {
-    if (code !== 0) {
-      process.exit(code);
-    }
+  return new Promise((resolve, reject) => {
+    const git = childProcess.spawn('git', options, { stdio: 'inherit' });
+    git.on('close', code => {
+      if (code !== 0) {
+        reject(code);
+      }
+      resolve(code);
+    });
   });
 };
 
 async function differCommits() {
-  const { stdout, stderr } = await exec(`git rev-list --count master..HEAD`);
-  if (stderr) {
-    console.error(stderr);
-    process.exit(1);
+  let git;
+  try {
+    git = await exec(`git rev-list --count master..HEAD`);
+  } catch (error) {
+    console.error(error);
   }
-
-  return parseInt(stdout.trim());
+  return parseInt(git.stdout.trim());
 }
 
 const httpsGet = (commitMessage, options) => {
@@ -120,20 +123,21 @@ if (arg.includes('--help') || arg.includes('-h')) {
 })();
 
 async function getRepoName() {
-  let name;
+  let name, git;
   arg.forEach(value => {
     if (value.startsWith('--remote-name=')) {
       name = value.split('=')[1];
     }
   });
 
-  const { stdout, stderr } = await exec(`git remote get-url ${name}`);
-  if (stderr) {
-    console.error(stderr);
-    process.exit(1);
+  try {
+    git = await exec(`git remote get-url ${name}`);
+  } catch (error) {
+    console.error(error);
   }
 
-  const gitConfig = stdout.trim();
+  const gitConfig = git.stdout.trim();
+
   return gitConfig.slice(
     gitConfig.indexOf(':') + 1,
     gitConfig.lastIndexOf('.git')
@@ -141,14 +145,14 @@ async function getRepoName() {
 }
 
 async function gitLog() {
-  const { stdout, stderr } = await exec('git log -1 --pretty=format:%B');
-
-  if (stderr) {
-    console.error(stderr);
-    process.exit(1);
+  let git;
+  try {
+    git = await exec('git log -1 --pretty=format:%B');
+  } catch (error) {
+    console.error(error);
   }
 
-  return stdout.trim();
+  return git.stdout.trim();
 }
 
 (async () => {
@@ -176,14 +180,14 @@ const onLandedBranch = () =>
   });
 
 async function commitsList() {
-  const { stdout, stderr } = await exec(
-    `git log -${await differCommits()} --pretty=format:%h`
-  );
-  if (stderr) {
-    console.error(stderr);
-    process.exit(1);
+  let git;
+  try {
+    git = await exec(`git log -${await differCommits()} --pretty=format:%h`);
+  } catch (error) {
+    console.error(error);
   }
-  return stdout
+
+  return git.stdout
     .split('\n')
     .reverse()
     .join(' ');
@@ -201,26 +205,32 @@ async function commitsList() {
   }
 })();
 
-async function getIssueNumber() {
-  const { stdout, stderr } = await exec('git log -1 --pretty=format:%B');
+(async () => {
+  if (arg.includes('--merge')) {
+    isLandedBranch();
+    runGit(['merge', `${await lastCommitHash()}`]);
+  }
+})();
 
-  if (stderr) {
-    console.error(stderr);
-    process.exit(1);
+async function getIssueNumber() {
+  let git;
+  try {
+    git = await exec('git log -1 --pretty=format:%B');
+  } catch (error) {
+    console.error(error);
   }
 
-  return parseInt(path.basename(stdout).trim());
+  return parseInt(path.basename(git.stdout).trim());
 }
 
 async function lastCommitHash() {
-  const { stdout, stderr } = await exec('git log -1 --pretty=format:%h');
-
-  if (stderr) {
-    console.error(stderr);
-    process.exit(1);
+  let git;
+  try {
+    git = await exec('git log -1 --pretty=format:%h');
+  } catch (error) {
+    console.error(error);
   }
-
-  return stdout;
+  return git.stdout;
 }
 
 (async () => {
@@ -264,12 +274,14 @@ async function lastCommitHash() {
 })();
 
 async function isLandedBranch() {
-  const { stdout, stderr } = await exec(`git rev-parse --abbrev-ref HEAD`);
-  if (stderr) {
-    console.error(stderr);
-    process.exit(1);
+  let git;
+  try {
+    git = await exec(`git rev-parse --abbrev-ref HEAD`);
+  } catch (error) {
+    console.error(error);
   }
-  const currentBranch = stdout.trim();
+
+  const currentBranch = git.stdout.trim();
   if (currentBranch !== landedBranch) {
     onLandedBranch();
   }
@@ -284,10 +296,3 @@ if (arg.includes('--push')) {
     }
   });
 }
-
-(async () => {
-  if (arg.includes('--merge')) {
-    isLandedBranch();
-    runGit(['merge', `${await lastCommitHash()}`]);
-  }
-})();
