@@ -6,6 +6,7 @@ const childProcess = require('child_process');
 const https = require('https');
 const path = require('path');
 const util = require('util');
+const clipboardy = require('clipboardy');
 
 const arg = process.argv.slice(2);
 const landedBranch = arg[0];
@@ -192,3 +193,8 @@ async function isLandedBranch() {
     onLandedBranch();
   }
 }
+
+(async () => {
+  clipboardy.write(`Landed in ${await lastCommitHash()}`);
+  clipboardy.read().then(console.log);
+})();
