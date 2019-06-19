@@ -27,11 +27,6 @@ Options:
   --remote-name   point to the remote repo
   --rebase        start interactive rebase of the source branch
   --autosquash    move commits that begin with squash!/fixup! during rebase
-  --squash-all    apply squash command on all commits (except first) and prompt
-                  user for the resulting commit message
-  --cherry-pick   apply commits from source branch onto <target-branch>
-  --landed        allow to automatically comment Landed in ... in the PR
-  --push          push last commit into <target-branch>
   --merge         merge branch into <target-branch>
   --help          print this help message and exit
   --version       print version and exit
@@ -110,18 +105,6 @@ if (arg.includes('--help') || arg.includes('-h')) {
   }
 })();
 
-(async () => {
-  if (arg.includes('--squash-all')) {
-    childProcess.exec(`git reset --soft HEAD~${await differCommits()}`, err => {
-      if (err) {
-        console.error(err);
-        process.exit(1);
-      }
-    });
-    runGit(['commit']);
-  }
-})();
-
 async function getRepoName() {
   let name, git;
   arg.forEach(value => {
@@ -179,49 +162,12 @@ const onLandedBranch = () =>
     }
   });
 
-async function commitsList() {
-  let git;
-  try {
-    git = await exec(`git log -${await differCommits()} --pretty=format:%h`);
-  } catch (error) {
-    console.error(error);
-  }
-
-  return git.stdout
-    .split('\n')
-    .reverse()
-    .join(' ');
-}
-
-(async () => {
-  if (arg.includes('--cherry-pick')) {
-    onLandedBranch();
-    childProcess.exec(`git cherry-pick ${await commitsList()}`, err => {
-      if (err) {
-        console.error(err);
-        process.exit(1);
-      }
-    });
-  }
-})();
-
 (async () => {
   if (arg.includes('--merge')) {
     isLandedBranch();
     runGit(['merge', `${await lastCommitHash()}`]);
   }
 })();
-
-async function getIssueNumber() {
-  let git;
-  try {
-    git = await exec('git log -1 --pretty=format:%B');
-  } catch (error) {
-    console.error(error);
-  }
-
-  return parseInt(path.basename(git.stdout).trim());
-}
 
 async function lastCommitHash() {
   let git;
@@ -232,46 +178,6 @@ async function lastCommitHash() {
   }
   return git.stdout;
 }
-
-(async () => {
-  if (arg.includes('--landed')) {
-    let user, token;
-    arg.forEach(value => {
-      if (value.startsWith('--user=')) {
-        user = value.split('=')[1];
-      }
-
-      if (value.startsWith('--token=')) {
-        token = value.split('=')[1];
-      }
-    });
-
-    const postData = JSON.stringify({
-      body: `Landed in ${await lastCommitHash()}`,
-    });
-
-    const options = {
-      host: 'api.github.com',
-      method: 'POST',
-      path: `/repos/${await getRepoName()}/issues/${await getIssueNumber()}/comments`,
-      headers: {
-        'user-agent': `${user}`,
-        accept: 'application/vnd.github.v3+json',
-        authorization: `token ${token}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-      },
-    };
-
-    const req = https.request(options);
-    req.on('error', err => {
-      console.error(err);
-      process.exit(1);
-    });
-    req.write(postData);
-    req.end();
-  }
-})();
 
 async function isLandedBranch() {
   let git;
@@ -285,14 +191,4 @@ async function isLandedBranch() {
   if (currentBranch !== landedBranch) {
     onLandedBranch();
   }
-}
-
-if (arg.includes('--push')) {
-  isLandedBranch();
-  childProcess.exec('git push', err => {
-    if (err) {
-      console.error(err);
-      process.exit(1);
-    }
-  });
 }
