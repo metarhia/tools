@@ -28,7 +28,7 @@ Options:
   --remote-name   point to the remote repo
   --rebase        start interactive rebase of the source branch
   --autosquash    move commits that begin with squash!/fixup! during rebase
-  --merge         merge branch into <target-branch>
+  --cherry-pick   apply commits from source branch onto <target-branch>
   --help          print this help message and exit
   --version       print version and exit
 `;
@@ -163,10 +163,29 @@ const onLandedBranch = () =>
     }
   });
 
+async function commitsList() {
+  let git;
+  try {
+    git = await exec(`git log -${await differCommits()} --pretty=format:%h`);
+  } catch (error) {
+    console.error(error);
+  }
+
+  return git.stdout
+    .split('\n')
+    .reverse()
+    .join(' ');
+}
+
 (async () => {
-  if (arg.includes('--merge')) {
-    isLandedBranch();
-    runGit(['merge', `${await lastCommitHash()}`]);
+  if (arg.includes('--cherry-pick')) {
+    onLandedBranch();
+    childProcess.exec(`git cherry-pick ${await commitsList()}`, err => {
+      if (err) {
+        console.error(err);
+        process.exit(1);
+      }
+    });
   }
 })();
 
@@ -178,20 +197,6 @@ async function lastCommitHash() {
     console.error(error);
   }
   return git.stdout;
-}
-
-async function isLandedBranch() {
-  let git;
-  try {
-    git = await exec(`git rev-parse --abbrev-ref HEAD`);
-  } catch (error) {
-    console.error(error);
-  }
-
-  const currentBranch = git.stdout.trim();
-  if (currentBranch !== landedBranch) {
-    onLandedBranch();
-  }
 }
 
 (async () => {
