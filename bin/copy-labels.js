@@ -68,7 +68,6 @@ const handleArgs = () => {
 };
 
 const printLabels = labels => {
-  if (!Array.isArray(labels)) labels = [labels];
   console.table(
     labels.reduce((acc, label) => {
       acc[label.name] = label;
