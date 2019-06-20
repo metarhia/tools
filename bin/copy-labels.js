@@ -46,7 +46,7 @@ const helpExit = (message, error) => {
   process.exit(1);
 };
 
-const getArgs = () => {
+const handleArgs = () => {
   const args = { args: [] };
   for (const arg of process.argv.slice(2)) {
     const [opt, value] = arg.split('=');
@@ -80,25 +80,15 @@ const printLabels = labels => {
 
 const readDump = async file => {
   const readFile = util.promisify(fs.readFile);
-  let data, result;
-  try {
-    data = await readFile(file);
-  } catch (err) {
-    helpExit('Error reading file:' + file, err);
-  }
-  try {
-    result = JSON.parse(data);
-  } catch (err) {
-    helpExit('Cannot parse JSON file:' + file, err);
-  }
-  return result;
+  const data = await readFile(file);
+  return JSON.parse(data);
 };
 
 const writeDump = async (file, data) => {
   const result = data.map(label => ({
     name: label.name,
     color: label.color,
-    description: label.description,
+    description: label.description || '',
   }));
 
   const writeFile = util.promisify(fs.writeFile);
@@ -109,35 +99,11 @@ const writeDump = async (file, data) => {
   }
 };
 
-const dryDelete = async (args, handler) => {
+const dryDeleteLabels = async (args, handler) => {
   const labels = await handler.get();
   const usedLabels = await handler.getUsedLabels(args.dstRepo);
   console.log(`Delete following labels from '${args.dstRepo}'`);
   printLabels(labels.filter(({ name }) => !usedLabels.has(name)));
-  if (usedLabels.size) {
-    console.error(
-      `The following labels have related issues and won't be deleted`
-    );
-    console.table(usedLabels);
-  }
-  return usedLabels;
-};
-
-const deleteLabels = async (args, handler) => {
-  let usedLabels = new Map();
-  if (args.dry) {
-    try {
-      usedLabels = await dryDelete(args, handler);
-    } catch (err) {
-      helpExit('Cannot delete labels(dry)', err);
-    }
-  } else {
-    try {
-      await handler.delete();
-    } catch (err) {
-      helpExit('Cannot delete labels', err);
-    }
-  }
   return usedLabels;
 };
 
@@ -287,7 +253,7 @@ const getConfig = async args => {
   return args;
 };
 
-const copy = async args => {
+const run = async args => {
   args = await getConfig(args);
   const handler = new LabelHandler({
     repo: args.dstRepo,
@@ -299,7 +265,25 @@ const copy = async args => {
 
   let usedLabels = new Map();
   if (args.dstRepo && args.delete) {
-    usedLabels = await deleteLabels(args, handler);
+    if (args.dry) {
+      try {
+        usedLabels = await dryDeleteLabels(args, handler);
+      } catch (err) {
+        helpExit('Cannot delete labels(dry)', err);
+      }
+    } else {
+      try {
+        usedLabels = await handler.delete();
+      } catch (err) {
+        helpExit('Cannot delete labels', err);
+      }
+    }
+  }
+  if (usedLabels.size) {
+    console.error(
+      `The following labels have related issues and won't be deleted`
+    );
+    console.table(usedLabels);
   }
 
   const labels = await getLabels(args, handler);
@@ -311,8 +295,8 @@ const copy = async args => {
   return labels;
 };
 
-const args = getArgs();
-copy(args).then(
+const args = handleArgs();
+run(args).then(
   labels => {
     if (!args.dry) printLabels(labels);
   },
