@@ -79,7 +79,12 @@ const printLabels = labels => {
 
 const readDump = async file => {
   const readFile = util.promisify(fs.readFile);
-  const data = await readFile(file);
+  let data;
+  try {
+    data = await readFile(file);
+  } catch (err) {
+    helpExit(`Error reading file: ${file}`, err);
+  }
   return JSON.parse(data);
 };
 
@@ -87,7 +92,7 @@ const writeDump = async (file, data) => {
   const result = data.map(label => ({
     name: label.name,
     color: label.color,
-    description: label.description || '',
+    description: label.description || undefined,
   }));
 
   const writeFile = util.promisify(fs.writeFile);
@@ -188,11 +193,7 @@ const dryCopyLabels = async (args, handler, labels, usedLabels) => {
 
 const copyLabels = async (args, handler, labels) => {
   if (args.dstFile) {
-    try {
-      await writeDump(args.dstFile, labels);
-    } catch (err) {
-      helpExit('Cannot write dump', err);
-    }
+    await writeDump(args.dstFile, labels);
   } else {
     try {
       labels = await handler.copyFrom(labels, args.update);
@@ -206,11 +207,7 @@ const copyLabels = async (args, handler, labels) => {
 const getLabels = async (args, handler) => {
   let labels;
   if (args.srcFile) {
-    try {
-      labels = await readDump(args.srcFile);
-    } catch (err) {
-      helpExit('Cannot read dump', err);
-    }
+    labels = await readDump(args.srcFile);
   } else {
     try {
       labels = await handler.getFrom(args.srcRepo);
@@ -261,7 +258,7 @@ const run = async args => {
       helpExit(`Cannot delete labels${args.dry ? '(dry)' : ''}`, err);
     }
   }
-  if (usedLabels.size) {
+  if (usedLabels.size !== 0) {
     console.error(
       `The following labels have related issues and won't be deleted`
     );
