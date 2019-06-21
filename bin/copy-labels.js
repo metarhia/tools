@@ -92,7 +92,7 @@ const writeDump = async (file, data) => {
 
   const writeFile = util.promisify(fs.writeFile);
   try {
-    data = await writeFile(file, JSON.stringify(result, null, 2));
+    await writeFile(file, JSON.stringify(result, null, 2));
   } catch (err) {
     helpExit(`Error writing file: ${file}`, err);
   }
@@ -160,16 +160,6 @@ const printUnchangedLabels = (args, labels, existingLabels, usedLabels) => {
   );
 };
 
-const getExistingLabels = async handler => {
-  let existingLabels;
-  try {
-    existingLabels = await handler.get();
-  } catch (err) {
-    helpExit('Cannot get existing labels', err);
-  }
-  return existingLabels;
-};
-
 const dryCopyLabels = async (args, handler, labels, usedLabels) => {
   if (args.dstFile) {
     console.log(
@@ -178,7 +168,7 @@ const dryCopyLabels = async (args, handler, labels, usedLabels) => {
     );
     printLabels(labels);
   } else {
-    const existingLabels = await getExistingLabels(handler);
+    const existingLabels = await handler.get();
     let msg = 'Copy the following labels from';
     if (args.srcFile) {
       msg += ` file '${args.srcFile}'`;
@@ -264,18 +254,11 @@ const run = async args => {
 
   let usedLabels = new Map();
   if (args.dstRepo && args.delete) {
-    if (args.dry) {
-      try {
-        usedLabels = await dryDeleteLabels(args, handler);
-      } catch (err) {
-        helpExit('Cannot delete labels(dry)', err);
-      }
-    } else {
-      try {
-        usedLabels = await handler.delete();
-      } catch (err) {
-        helpExit('Cannot delete labels', err);
-      }
+    try {
+      if (args.dry) usedLabels = await dryDeleteLabels(args, handler);
+      else usedLabels = await handler.delete();
+    } catch (err) {
+      helpExit(`Cannot delete labels${args.dry ? '(dry)' : ''}`, err);
     }
   }
   if (usedLabels.size) {
