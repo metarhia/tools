@@ -81,11 +81,11 @@ const readDump = async file => {
   const readFile = util.promisify(fs.readFile);
   let data;
   try {
-    data = await readFile(file);
+    data = JSON.parse(await readFile(file));
   } catch (err) {
-    helpExit(`Error reading file: ${file}`, err);
+    helpExit(`Error reading json file: ${file}`, err);
   }
-  return JSON.parse(data);
+  return data;
 };
 
 const writeDump = async (file, data) => {
