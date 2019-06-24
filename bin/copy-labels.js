@@ -79,13 +79,11 @@ const printLabels = labels => {
 
 const readDump = async file => {
   const readFile = util.promisify(fs.readFile);
-  let data;
   try {
-    data = JSON.parse(await readFile(file));
+    return JSON.parse(await readFile(file));
   } catch (err) {
-    helpExit(`Error reading json file: ${file}`, err);
+    return helpExit(`Error reading json file: ${file}`, err);
   }
-  return data;
 };
 
 const writeDump = async (file, data) => {
