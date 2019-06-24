@@ -270,15 +270,14 @@ const run = async args => {
     await dryCopyLabels(args, handler, labels, usedLabels);
   } else {
     await copyLabels(args, handler, labels);
+    printLabels(labels);
   }
   return labels;
 };
 
 const args = handleArgs();
 run(args).then(
-  labels => {
-    if (!args.dry) printLabels(labels);
-  },
+  () => {},
   err => {
     helpExit('Cannot copy labels', err);
   }
