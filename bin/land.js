@@ -6,6 +6,7 @@ const childProcess = require('child_process');
 const https = require('https');
 const path = require('path');
 const util = require('util');
+const clipboardy = require('clipboardy');
 
 const args = process.argv.slice(2);
 const exec = util.promisify(childProcess.exec);
@@ -26,6 +27,7 @@ Options:
   --rebase        start interactive rebase of the source branch
   --autosquash    move commits that begin with squash!/fixup! during rebase
   --cherry-pick   apply commits from source branch onto <target-branch>
+  --clipboardy    print 'Landed in (...commitsHash)'
   --help          print this help message and exit
   --version       print version and exit
 `;
@@ -183,6 +185,7 @@ async function lastCommitHash() {
 
   const commitsCount = await differCommits();
   const differCommitsHash = (await commitsHash(commitsCount)).split('\n');
+  const commitsHashArr = new Array();
 
   let prUrl,
     extendedCommit,
@@ -201,14 +204,18 @@ async function lastCommitHash() {
 
       extendedCommit = `${gitLogBody}\n\nPR-URL: ${prUrl}`;
 
-      childProcess.execSync(`git commit --amend --message='${extendedCommit}'`);
+      childProcess.execSync(
+        `git commit --amend --allow-empty --message='${extendedCommit}'`
+      );
 
       const modifiedCommitsHash = await lastCommitHash();
 
       childProcess.execSync(`git checkout ${sourceBranch}`);
 
       childProcess.execSync(`git replace -f ${hash} ${modifiedCommitsHash}`);
+      commitsHashArr.push(modifiedCommitsHash);
     }
+    commitsHashArr.push(hash);
     childProcess.execSync(`git checkout ${sourceBranch}`);
   }
 
@@ -223,5 +230,10 @@ async function lastCommitHash() {
         }
       }
     );
+  }
+
+  if (args.includes('--clipboardy')) {
+    clipboardy.write(`Landed in ${commitsHashArr.join(', ')}`);
+    clipboardy.read().then(console.log);
   }
 })();
