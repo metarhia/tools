@@ -6,26 +6,23 @@ const childProcess = require('child_process');
 const https = require('https');
 const path = require('path');
 const util = require('util');
-const clipboardy = require('clipboardy');
 
-const arg = process.argv.slice(2);
-const landedBranch = arg[0];
+const args = process.argv.slice(2);
+const exec = util.promisify(childProcess.exec);
+const targetBranch = args[0] || 'master';
 const toolName = path.basename(process.argv[1]);
 const toolVersion = require('../package.json').version;
-const exec = util.promisify(childProcess.exec);
 
 const help = `\
-This a Pull Request landing tool that will automatically pick up commits from
-the branch add metadata to them and merge into the specified branch.
+This is a Pull Request landing tool that will automatically pick up commits from
+the branch adds metadata to them and merge them into the specified branch.
 
 Usage: ${toolName} <target-branch> [OPTION]
        ${toolName} --help
        ${toolName} --version
 
 Options:
-  --user          GitHub username
-  --token         GitHub access token
-  --remote-name   point to the remote repo
+  --remote-name   get name from remote repo
   --rebase        start interactive rebase of the source branch
   --autosquash    move commits that begin with squash!/fixup! during rebase
   --cherry-pick   apply commits from source branch onto <target-branch>
@@ -35,80 +32,85 @@ Options:
 
 const runGit = async function(options) {
   return new Promise((resolve, reject) => {
-    const git = childProcess.spawn('git', options, { stdio: 'inherit' });
+    const git = childProcess.spawn('git', options, {
+      stdio: 'inherit',
+      windowsHide: true,
+    });
     git.on('close', code => {
       if (code !== 0) {
-        reject(code);
+        reject(new SyntaxError('git exit with exit code !== 0'));
       }
-      resolve(code);
+      resolve();
     });
   });
 };
 
+async function commitsHash(count) {
+  let git;
+  try {
+    git = await exec(`git log -${count} --pretty=format:%h`);
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
+  return git.stdout;
+}
+
 async function differCommits() {
   let git;
   try {
-    git = await exec(`git rev-list --count master..HEAD`);
+    git = await exec(`git rev-list --count ${targetBranch}..HEAD`);
   } catch (error) {
     console.error(error);
+    process.exit(1);
   }
   return parseInt(git.stdout.trim());
 }
 
-const httpsGet = (commitMessage, options) => {
-  https
-    .get(options, res => {
-      let data = '';
-      res.setEncoding('utf8');
-
-      res.on('data', chunk => {
-        data += chunk;
-      });
-
-      res.on('end', () => {
-        const prUrl = JSON.parse(data).items[0].html_url;
-
-        const extendedCommit = `${commitMessage}\n\nPR-URL: ${prUrl}`;
-        childProcess.exec(
-          `git commit --amend --message='${extendedCommit}'`,
-          err => {
-            if (err) {
-              console.error(err);
-              process.exit(1);
-            }
-          }
-        );
-      });
-    })
-    .on('error', err => {
-      console.error(err);
-      process.exit(1);
-    });
-};
-
-if (arg.includes('--help') || arg.includes('-h')) {
-  console.log(help);
-  process.exit(0);
-} else if (arg.includes('--version')) {
-  console.log(toolVersion);
-  process.exit(0);
+async function currentBranch() {
+  let git;
+  try {
+    git = await exec('git rev-parse --abbrev-ref HEAD');
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
+  return git.stdout.trim();
 }
 
-(async () => {
-  if (arg.includes('--rebase')) {
-    runGit(['rebase', '-i', `HEAD~${await differCommits()}`]);
-  }
-})();
+async function httpsGet(sourceBranch, targetBranch) {
+  const options = {
+    path: `/search/issues?q=repo:${await getRepoName()}+is:pr+is:open+head:${sourceBranch}+base:${targetBranch}`,
+    headers: {
+      'user-agent': 'metarhia-api-landing-tool',
+    },
+    host: 'api.github.com',
+  };
 
-(async () => {
-  if (arg.includes('--autosquash')) {
-    runGit(['rebase', '-i', '--autosquash', `HEAD~${await differCommits()}`]);
-  }
-})();
+  return new Promise((resolve, reject) => {
+    https
+      .get(options, res => {
+        let data = '';
+        res.setEncoding('utf8');
+
+        res.on('data', chunk => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          resolve(JSON.parse(data).items[0].html_url);
+        });
+      })
+      .on('error', err => {
+        reject(err.message);
+      });
+  });
+}
 
 async function getRepoName() {
-  let name, git;
-  arg.forEach(value => {
+  let git,
+    name = 'origin';
+  args.forEach(value => {
     if (value.startsWith('--remote-name=')) {
       name = value.split('=')[1];
     }
@@ -118,6 +120,7 @@ async function getRepoName() {
     git = await exec(`git remote get-url ${name}`);
   } catch (error) {
     console.error(error);
+    process.exit(1);
   }
 
   const gitConfig = git.stdout.trim();
@@ -134,60 +137,27 @@ async function gitLog() {
     git = await exec('git log -1 --pretty=format:%B');
   } catch (error) {
     console.error(error);
+    process.exit(1);
   }
 
   return git.stdout.trim();
 }
 
-(async () => {
-  const gitLogBody = await gitLog();
+if (args.includes('--help')) {
+  console.log(help);
+  process.exit(0);
+} else if (args.includes('--version')) {
+  console.log(toolVersion);
+  process.exit(0);
+}
 
-  if (!gitLogBody.includes('PR-URL:')) {
-    const options = {
-      path: `/search/issues?q=repo:${await getRepoName()}+is:pr+head:${landedBranch}`,
-      headers: {
-        'user-agent': 'metarhia-api-landing-tool',
-      },
-      host: 'api.github.com',
-    };
-
-    httpsGet(gitLogBody, options);
-  }
-})();
-
-const onLandedBranch = () =>
-  childProcess.exec(`git checkout ${landedBranch}`, err => {
+const onTargetBranch = () =>
+  childProcess.exec(`git checkout ${targetBranch}`, err => {
     if (err) {
       console.error(err);
       process.exit(1);
     }
   });
-
-async function commitsList() {
-  let git;
-  try {
-    git = await exec(`git log -${await differCommits()} --pretty=format:%h`);
-  } catch (error) {
-    console.error(error);
-  }
-
-  return git.stdout
-    .split('\n')
-    .reverse()
-    .join(' ');
-}
-
-(async () => {
-  if (arg.includes('--cherry-pick')) {
-    onLandedBranch();
-    childProcess.exec(`git cherry-pick ${await commitsList()}`, err => {
-      if (err) {
-        console.error(err);
-        process.exit(1);
-      }
-    });
-  }
-})();
 
 async function lastCommitHash() {
   let git;
@@ -195,11 +165,63 @@ async function lastCommitHash() {
     git = await exec('git log -1 --pretty=format:%h');
   } catch (error) {
     console.error(error);
+    process.exit(1);
   }
   return git.stdout;
 }
 
 (async () => {
-  clipboardy.write(`Landed in ${await lastCommitHash()}`);
-  clipboardy.read().then(console.log);
+  const sourceBranch = await currentBranch();
+
+  if (args.includes('--rebase')) {
+    runGit(['rebase', `origin/${targetBranch}`]);
+  }
+
+  if (args.includes('--autosquash')) {
+    runGit(['rebase', '-i', '--autosquash', `HEAD~${await differCommits()}`]);
+  }
+
+  const commitsCount = await differCommits();
+  const differCommitsHash = (await commitsHash(commitsCount)).split('\n');
+
+  let prUrl,
+    extendedCommit,
+    urlRequest = false;
+
+  for (const hash of differCommitsHash) {
+    childProcess.execSync(`git checkout ${hash}`);
+
+    const gitLogBody = await gitLog();
+
+    if (!gitLogBody.includes('PR-URL:')) {
+      if (!urlRequest) {
+        prUrl = await httpsGet(sourceBranch, targetBranch);
+        urlRequest = true;
+      }
+
+      extendedCommit = `${gitLogBody}\n\nPR-URL: ${prUrl}`;
+
+      childProcess.execSync(`git commit --amend --message='${extendedCommit}'`);
+
+      const modifiedCommitsHash = await lastCommitHash();
+
+      childProcess.execSync(`git checkout ${sourceBranch}`);
+
+      childProcess.execSync(`git replace -f ${hash} ${modifiedCommitsHash}`);
+    }
+    childProcess.execSync(`git checkout ${sourceBranch}`);
+  }
+
+  if (args.includes('--cherry-pick')) {
+    onTargetBranch();
+    childProcess.exec(
+      `git cherry-pick ${sourceBranch}..${targetBranch}`,
+      err => {
+        if (err) {
+          console.error(err);
+          process.exit(1);
+        }
+      }
+    );
+  }
 })();
