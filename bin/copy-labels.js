@@ -274,9 +274,4 @@ const run = async args => {
 };
 
 const args = handleArgs();
-run(args).then(
-  () => {},
-  err => {
-    helpExit('Cannot copy labels', err);
-  }
-);
+run(args).catch(err => helpExit('Cannot copy labels', err));
