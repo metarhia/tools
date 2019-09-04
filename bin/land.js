@@ -112,11 +112,11 @@ async function httpsGet(sourceBranch, targetBranch) {
 async function getRepoName() {
   let git,
     name = 'origin';
-  args.forEach(value => {
+  for (const value of args) {
     if (value.startsWith('--remote-name=')) {
       name = value.split('=')[1];
     }
-  });
+  }
 
   try {
     git = await exec(`git remote get-url ${name}`);
